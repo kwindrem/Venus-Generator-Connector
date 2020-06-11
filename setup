@@ -1,0 +1,328 @@
+#!/bin/sh
+
+# this script sets up (or deactivates/removes) the Generator Connector mechanism
+# which connects the generator digital input to the generator control
+
+# file check that works locally and remotly via ssh
+fileExists ()
+{
+        if [ -z "$commandPreamble" ]; then
+                return $(test -e $1)
+        else
+                return $($commandPreamble test -e $1)
+        fi
+}
+
+# closes shared ssh connection
+sshRelease ()
+{
+    if [ ! -z "$commandPreamble" ]; then
+        ssh -q -o ControlPath=$controlPath -O exit root@$ipAddr
+    fi
+}
+
+scriptDir=$(dirname "$0")
+connectorDir=/data/GeneratorConnector
+qmlDir=/opt/victronenergy/gui/qml
+genDir=/opt/victronenergy/dbus-generator-starter
+
+installedGuiFile=OverviewGenerator.qml
+origGuiFile=$installedGuiFile.orig
+installedGenFile=startstop.py
+origGenFile=$installedGenFile.orig
+
+logDir=/var/log/dbus-generator-starter
+logFile=$logDir/current
+filesToCopy="$installedGuiFile $origGuiFile $installedGenFile $origGenFile ReadMe setup rc.GeneratorConnector"
+
+actionText=""
+installSuccess="y"
+
+# display innitial message if no command line arguments
+if [ -z $1 ]; then
+    echo
+    echo The Generator Connector mechanism connects the generator digital input
+    echo to the generator control manual start
+    echo When the digial input changes to the running state,
+    echo Venus Manual Start is changed to true if there are no automatic run conditions
+    echo When the digital input changes to the not running,
+    echo Venus Manual Start is changed to false
+fi
+
+# collect any command line parameters
+ipAddr=''
+action=''
+while [ ! -z $1 ]
+do
+    case $1 in
+        ip)
+            shift
+            ipAddr=$1
+            ;;
+        activate | a)
+            action='a'
+            ;;
+        reactivate | r)
+            action='r'
+            ;;
+        install | in | i)
+            action='i'
+            ;;
+        deactivate | d)
+            action='d'
+            ;;
+        uninstall | u)
+            action='u'
+            ;;
+        log | l)
+            action='l'
+            ;;
+        copy | c)
+            action='c'
+            ;;
+        quit | q)
+            action='q'
+            ;;
+        *)
+            echo warning: unrecognized parameter $1
+    esac
+    shift
+done
+
+#prompt for parameters not provided on the command line
+
+if [ -z $action ]; then
+    echo
+    echo "This script will do the following:"
+    echo "  Activate (a) updates the GUI files and starts the repeater"
+    echo "  Deactivate (d) stops the forwarder"
+    echo "  Uninstall (u) deactivates, restores GUI files to stock and remove all files"
+    echo "  Quit (q) without further action"
+    echo "  Display Log (l) outputs the last 100 lines of the log"
+    echo " additional choices when running on host"
+    echo "  Copy (c) copies file from host to Venus and exits"
+    echo "  Install (i) Copy then Activate"
+    echo
+fi
+while [ -z $action ] || ! ( [ $action == 'a' ] || [ $action == 'd' ] || [ $action == 'u' ] || [ $action == 'q' ]\
+            || [ $action == 'l' ]|| [ $action == 'i' ] || [ $action == 'c' ] )
+do
+    /bin/echo -n "Choose an action from the list above: "
+    read action
+done
+
+if [ $action == 'q' ]; then
+    sshRelease
+    exit
+fi
+
+if [ $action == 'a' ] || [ $action == 'i' ]; then
+    actionText="Activating Generator Connector"
+fi
+
+
+# check to see if script is running on host or Venus device
+# running on Venus device
+if [ -f /opt/victronenergy/version ]; then
+    version=$(head -n 1 /opt/victronenergy/version)
+    echo running on Venus - version $version
+    commandPreamble=""
+
+# running on host
+else
+    # persist at getting a valid IP address
+    while [ -z $ipAddr ]
+    do
+        # try to get last one from file
+        if [ -f "$scriptDir/venusIp" ]; then
+            ipAddr=$( cat "$scriptDir/venusIp")
+        fi
+        if [ ! -z $ipAddr ]; then
+            /bin/echo -n "Enter a new Venus IP address (cr) to use $ipAddr: "
+            read answer
+            if [ ! -z $answer ]; then
+                ipAddr=$answer
+            fi
+        else
+            /bin/echo -n "Enter the IP address of the Venus OS device: "
+            read ipAddr
+        fi
+        if [ -z $ipAddr ]; then
+            continue
+        fi
+        # make innitial ssh connection and set up ssh sharing
+        controlPath=~/.ssh/%r@%h:%p
+        commandPreamble="ssh -o ControlPath=$controlPath root@$ipAddr"
+        # close a previous shared ssh connection if any
+        sshRelease
+        # attempt a new connection
+        version=$($commandPreamble -o ControlMaster=yes -o ControlPersist=5m head -n 1 /opt/victronenergy/version)
+        if [ -z $version ]; then
+            echo $ipAddr does not appear to be a Venus device
+            ipAddr=""
+        fi
+    done
+
+    echo connected to remote Venus version $version at $ipAddr
+    # save IP address for future use
+    echo $ipAddr > "$scriptDir/venusIp"
+
+    # assume we'll copy and continue
+    copyToVenus='y'
+    continueOnVenus='y'
+    # don't continue if uninstalling and repeater never installed
+    if [ $action == 'u' ]; then
+        copyToVenus='n'
+        # don't continue if repeater was never installed
+        if ! fileExists $connectorDir ; then
+            continueOnVenus='n'
+            echo no files to delete
+        fi
+    # don't continue if just copying
+    elif [ $action == 'c' ]; then
+        continueOnVenus='n'
+    # display log command executed on host - don't copy or continue
+    elif [ $action == 'l' ]; then
+        copyToVenus='n'
+        continueOnVenus='n'
+    fi
+
+    if [ $copyToVenus == 'y' ]; then
+        if ! fileExists $connectorDir ; then
+            echo creating /data/GeneratorConnector directory
+            $commandPreamble mkdir $connectorDir
+        fi
+        echo copying files from host to Venus
+        scp -rpq -o ControlPath=$controlPath $filesToCopy root@$ipAddr:$connectorDir
+    fi
+
+    # continue setup on Venus device
+    if [ $continueOnVenus == 'y' ]; then
+        echo contining setup on Venus ... setup $action
+        $commandPreamble $connectorDir/setup $action
+    fi
+fi
+
+# just display log and exit - runs from host or Venus !
+if [ $action == 'l' ]; then
+    $commandPreamble tail -100 $logFile | $commandPreamble tai64nlocal
+    sshRelease
+    exit
+fi
+
+# exit here if running on host
+if [ "$commandPreamble" ]; then
+    sshRelease
+    exit
+fi
+
+
+# the remainder of this script runs ONLY on the Venus device
+# we get here from the ssh call to setup above
+# all parameters are passed to setup so all prompts for user input are bypassed
+
+
+# if uninstalling, remove existing Repeater files
+if [ $action == 'u' ]; then
+    echo "removing all /data/GeneratorConnector files (if any)"
+    rm -rf $connectorDir
+fi
+
+if [ $action == 'a' ] || [ $action == 'i' ]; then
+
+    # save copy of currently installed GUI file
+    if fileExists $qmlDir/$origGuiFile ; then
+        echo $origGuiFile exists - not changed
+    else
+        echo existing $installedGuiFile saved as $origGuiFile
+        cp $qmlDir/$installedGuiFile $qmlDir/$origGuiFile
+    fi
+
+    # save copy of currently installed generator file
+    if fileExists $genDir/$origGenFile ; then
+        echo $origGenFile exists - not changed
+    else
+        echo existing $installedGenFile saved as $origGenFile
+        cp $genDir/$installedGenFile $genDir/$origGenFile
+    fi
+
+    # compare original GUI file with expected content
+    if diff -q $qmlDir/$origGuiFile $connectorDir/$origGuiFile > /dev/null; then
+            echo replacing $installedGuiFile
+            cp $connectorDir/$installedGuiFile $qmlDir/$installedGuiFile
+    # GUI file doesn't match - do nothing an display/log error
+    else
+        echo "$origGuiFile content DIFFERENT - can't replace with package version"
+        echo HAND EDITING required
+        #### echo "++ Gennerator Connector setup: HAND EDITING $qmlDir/$installedGuiFile required" | tai64n >> $logFile
+        installSuccess="n"
+    fi
+
+    # compare original generator file with expected content
+    if diff -q $genDir/$origGenFile $connectorDir/$origGenFile > /dev/null; then
+            echo replacing $installedGenFile
+            cp $connectorDir/$installedGenFile $genDir/$installedGenFile
+    # GUI file doesn't match - do nothing an display/log error
+    else
+        echo "$origGenFile content DIFFERENT - can't replace with package version"
+        echo HAND EDITING required
+        #### echo "++ Gennerator Connector setup: HAND EDITING $genDir/$installedGenFile required" | tai64n >> $logFile
+        installSuccess="n"
+    fi
+
+    # setup for reactivate
+    if [ $installSuccess == 'y' ]; then
+        # flag a future ractivate (used by /data/rc.local)
+        touch $connectorDir/reactivate
+ 
+        # add reactivate code to rc.local
+        if ! fileExists /data/rc.local ; then
+            echo creating /data/rc.local
+            cp $connectorDir/rc.GeneratorConnector /data/rc.local
+        else
+            if [ $(grep -c end\ GeneratorConnector /data/rc.local) == 0 ]; then
+                echo adding repeater reactivate to /data/rc.local
+                sed '1,/end\ intro/d' $connectorDir/rc.GeneratorConnector >> /data/rc.local
+            fi
+        fi
+    fi
+# deleting or uninstalling
+else
+    if [ action == 'd' ]; then
+        actionText="Deactivating GeneratorConnector"
+    else
+        actionText="Uninstalling GeneratorConnector"
+    fi
+
+    # make sure repeater isn't reinstalled
+    rm -f  $connectorDir/reactivate
+
+    echo restoring original files
+    if fileExists $qmlDir/$origGuiFile ; then
+        echo $origGuiFile exists, making it active again
+        mv $qmlDir/$origGuiFile $qmlDir/$installedGuiFile
+    else
+        echo $origGuiFile does not exist - $installedGenFile not changed
+    fi
+    if fileExists $qmlDir/$installedGenFile ; then
+        echo $origGenFile exists, making it active again
+        mv $qmlDir/$origGenFile $qmlDir/$installedGenFile
+    else
+        echo $origGenFile does not exist - $installedGenFile not changed
+    fi
+fi
+
+if [ $installSuccess == 'y' ]; then
+    echo Restarting processes
+    killall gui
+    ps | grep dbus_generator | grep -v grep  | awk '{print $1}' | xargs kill > /dev/null 2>&1
+    # add a message to the Repeater log regarding this setup
+    if ! fileExists $logDir; then
+        mkdir $logDir
+    fi
+    echo ++ Gennerator Connector setup: "$actionText" | tai64n >> $logFile
+elif fileExists $logDir; then
+    echo ++ Gennerator Connector setup: FAILED | tai64n >> $logFile
+fi
+
+
