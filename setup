@@ -23,6 +23,7 @@ sshRelease ()
 
 scriptDir=$(dirname "$0")
 connectorDir=/data/GeneratorConnector
+fileSets=$connectorDir/fileSets
 qmlDir=/opt/victronenergy/gui/qml
 genDir=/opt/victronenergy/dbus-generator-starter
 
@@ -33,7 +34,7 @@ origGenFile=$installedGenFile.orig
 
 logDir=/var/log/dbus-generator-starter
 logFile=$logDir/current
-filesToCopy="$installedGuiFile $origGuiFile $installedGenFile $origGenFile ReadMe setup rc.GeneratorConnector"
+filesToCopy="fileSets ReadMe setup rc.GeneratorConnector"
 
 actionText=""
 installSuccess="y"
@@ -117,7 +118,7 @@ if [ $action == 'q' ]; then
 fi
 
 if [ $action == 'a' ] || [ $action == 'i' ]; then
-    actionText="Activating Generator Connector"
+    actionText="Activating GeneratorConnector"
 fi
 
 
@@ -173,7 +174,7 @@ else
     # don't continue if uninstalling and repeater never installed
     if [ $action == 'u' ]; then
         copyToVenus='n'
-        # don't continue if repeater was never installed
+        # don't continue if package was never installed
         if ! fileExists $connectorDir ; then
             continueOnVenus='n'
             echo no files to delete
@@ -216,7 +217,6 @@ if [ "$commandPreamble" ]; then
     exit
 fi
 
-
 # the remainder of this script runs ONLY on the Venus device
 # we get here from the ssh call to setup above
 # all parameters are passed to setup so all prompts for user input are bypassed
@@ -246,27 +246,53 @@ if [ $action == 'a' ] || [ $action == 'i' ]; then
         cp $genDir/$installedGenFile $genDir/$origGenFile
     fi
 
+    # select file set based on Venus version
+    case $version in
+            v2.54)
+                     fileVer='v2.54'
+                    ;;
+            v2.60~26)
+                    fileVer='v2.60rc26'
+                    ;;
+            *)
+                    fileVer='none'
+                    ;;
+    esac
+
+    if [ $fileVer == 'none' ]; then
+        echo "WARNING no files for Venus $version"
+        echo You must HAND EDIT changes for these files:
+        echo "   $qmlDir/$installedGuiFile"
+        echo "   $genDir/$installedGenFile"
+        echo Then manually restart the GUI and dbus_generator
+        if fileExists $logDir; then
+            echo "++ Gennerator Connector setup: No files for Venus $version" | tai64n >> $logFile
+        fi
+        echo setup is now exiting
+        exit
+    fi
+
     # compare original GUI file with expected content
-    if diff -q $qmlDir/$origGuiFile $connectorDir/$origGuiFile > /dev/null; then
+    if diff -q $qmlDir/$origGuiFile $fileSets/$fileVer/$origGuiFile > /dev/null; then
             echo replacing $installedGuiFile
-            cp $connectorDir/$installedGuiFile $qmlDir/$installedGuiFile
+            cp $fileSets/$fileVer/$installedGuiFile $qmlDir/$installedGuiFile
     # GUI file doesn't match - do nothing an display/log error
     else
         echo "$origGuiFile content DIFFERENT - can't replace with package version"
         echo HAND EDITING required
-        #### echo "++ Gennerator Connector setup: HAND EDITING $qmlDir/$installedGuiFile required" | tai64n >> $logFile
+        echo "++ Gennerator Connector setup: HAND EDITING $qmlDir/$installedGuiFile required" | tai64n >> $logFile
         installSuccess="n"
     fi
 
     # compare original generator file with expected content
-    if diff -q $genDir/$origGenFile $connectorDir/$origGenFile > /dev/null; then
+    if diff -q $genDir/$origGenFile $fileSets/$fileVer/$origGenFile > /dev/null; then
             echo replacing $installedGenFile
-            cp $connectorDir/$installedGenFile $genDir/$installedGenFile
+            cp $fileSets/$fileVer/$installedGenFile $genDir/$installedGenFile
     # GUI file doesn't match - do nothing an display/log error
     else
         echo "$origGenFile content DIFFERENT - can't replace with package version"
         echo HAND EDITING required
-        #### echo "++ Gennerator Connector setup: HAND EDITING $genDir/$installedGenFile required" | tai64n >> $logFile
+        echo "++ Gennerator Connector setup: HAND EDITING $genDir/$installedGenFile required" | tai64n >> $logFile
         installSuccess="n"
     fi
 
@@ -294,7 +320,7 @@ else
         actionText="Uninstalling GeneratorConnector"
     fi
 
-    # make sure repeater isn't reinstalled
+    # make sure packate isn't reinstalled
     rm -f  $connectorDir/reactivate
 
     echo restoring original files
