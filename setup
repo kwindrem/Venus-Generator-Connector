@@ -251,7 +251,7 @@ if [ $action == 'a' ] || [ $action == 'i' ]; then
             v2.54)
                      fileVer='v2.54'
                     ;;
-            v2.60~26)
+            v2.60~26 | v2.60~28)
                     fileVer='v2.60rc26'
                     ;;
             *)
@@ -272,11 +272,13 @@ if [ $action == 'a' ] || [ $action == 'i' ]; then
         exit
     fi
 
-    # compare original GUI file with expected content
-    if diff -q $qmlDir/$origGuiFile $fileSets/$fileVer/$origGuiFile > /dev/null; then
-            echo replacing $installedGuiFile
-            cp $fileSets/$fileVer/$installedGuiFile $qmlDir/$installedGuiFile
-    # GUI file doesn't match - do nothing an display/log error
+    # Check to see if GUI file has already been updated to this package version (a previous instll may have failed)
+    if diff -q $qmlDir/$installedGuiFile $fileSets/$fileVer/$installedGuiFile > /dev/null; then
+        echo $installedGuiFile is already up to date
+    # if original GUI file matches with expected oritinal content, install the package verion
+    elif diff -q $qmlDir/$origGuiFile $fileSets/$fileVer/$origGuiFile > /dev/null; then
+        echo replacing $installedGuiFile
+        cp $fileSets/$fileVer/$installedGuiFile $qmlDir/$installedGuiFile
     else
         echo "$origGuiFile content DIFFERENT - can't replace with package version"
         echo HAND EDITING required
@@ -284,11 +286,14 @@ if [ $action == 'a' ] || [ $action == 'i' ]; then
         installSuccess="n"
     fi
 
-    # compare original generator file with expected content
-    if diff -q $genDir/$origGenFile $fileSets/$fileVer/$origGenFile > /dev/null; then
-            echo replacing $installedGenFile
-            cp $fileSets/$fileVer/$installedGenFile $genDir/$installedGenFile
-    # GUI file doesn't match - do nothing an display/log error
+    # Check to see if generator file has already been updated to this package version (a previous instll may have failed)
+    if diff -q $genDir/$installedGenFile $fileSets/$fileVer/$installedGenFile > /dev/null; then
+        echo $installedGenFile is already up to date
+    # if original generator file matches with expected oritinal content, install the package verion
+    elif diff -q $genDir/$origGenFile $fileSets/$fileVer/$origGenFile > /dev/null; then
+        echo replacing $installedGenFile
+        cp $fileSets/$fileVer/$installedGenFile $genDir/$installedGenFile
+    # can't find any matches - give up
     else
         echo "$origGenFile content DIFFERENT - can't replace with package version"
         echo HAND EDITING required
