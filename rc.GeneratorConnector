@@ -13,7 +13,7 @@
 # the key file is one of the files created when the Generator Connector is activated
 # and destroyed during a Venus software upate
 
-$keyFile=/opt/victronenergy/dbus-generator-starter/startstop.py.orig
+keyFile=/opt/victronenergy/dbus-generator-starter/startstop.py.orig
 
 if [ ! -e $keyFile ] && [ -f /data/GeneratorConnector/reactivate ]; then
     /data/GeneratorConnector/setup activate
