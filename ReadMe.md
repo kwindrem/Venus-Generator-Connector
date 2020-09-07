@@ -1,6 +1,6 @@
 This software provides a conneciton between the generator digital input
 and the Venus generator control logic.
-Functionality has been verified on Venus version 2.54-58 and 2.60 release candidate ~26 through ~42.
+Functionality has been verified on Venus version 2.54-58 and 2.60.
 Other versions may need rewrites of the two modified files. 
 The installer will provide an alert if the stock files differ from the expected ones
 
